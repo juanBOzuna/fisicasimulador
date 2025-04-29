@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulación Energía Oleaje</title>
+  <style>
+    :root {
+      --primary: #2c3e50;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --danger: #e74c3c;
+      --bg: #ecf0f1;
+      --text: #34495e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 1rem; }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      width: 100%;
+      max-width: 800px;
+      margin-bottom: 1.5rem;
+    }
+    .control { display: flex; flex-direction: column; }
+    .control label { margin-bottom: 0.25em; font-weight: bold; }
+    .control input[type=range] { width: 100%; }
+    .control input[type=number] {
+      margin-top: 0.25em;
+      width: 100%;
+      padding: 0.2em;
+    }
+    .buttons {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 1.5rem;
+    }
+    button {
+      padding: 0.5em 1em;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: bold;
+    }
+    button.start { background: var(--accent); color: white; }
+    button.reset { background: var(--danger); color: white; }
+    canvas {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simulación Energía Oleaje</h1>
+
+  <div class="controls">
+    <div class="control">
+      <label for="radius">Radio Boya (m)</label>
+      <input id="radius" type="range" min="0.1" max="5" step="0.1" value="1">
+      <input id="radiusNum" type="number" min="0.1" max="5" step="0.1" value="1">
+    </div>
+    <div class="control">
+      <label for="mass">Masa Boya (kg)</label>
+      <input id="mass" type="range" min="100" max="2000" step="50" value="500">
+      <input id="massNum" type="number" min="100" max="2000" step="50" value="500">
+    </div>
+    <div class="control">
+      <label for="height">Altura Ola (m)</label>
+      <input id="height" type="range" min="0.1" max="5" step="0.1" value="2">
+      <input id="heightNum" type="number" min="0.1" max="5" step="0.1" value="2">
+    </div>
+    <div class="control">
+      <label for="frequency">Frecuencia Ola (Hz)</label>
+      <input id="frequency" type="range" min="0.05" max="1" step="0.01" value="0.1">
+      <input id="frequencyNum" type="number" min="0.05" max="1" step="0.01" value="0.1">
+    </div>
+    <div class="control">
+      <label for="damping">Amortiguamiento</label>
+      <input id="damping" type="range" min="100" max="10000" step="100" value="1000">
+      <input id="dampingNum" type="number" min="100" max="10000" step="100" value="1000">
+    </div>
+  </div>
+
+  <div class="buttons">
+    <button id="start" class="start">Iniciar</button>
+    <button id="reset" class="reset">Reiniciar</button>
+  </div>
+
+  <canvas id="canvasWave" width="800" height="200"></canvas>
+  <canvas id="canvasBuoy" width="800" height="200"></canvas>
+  <canvas id="canvasEnergy" width="800" height="200"></canvas>
+
+  <script>
+   
+    const g = 9.81;
+    const rho = 1025;
+    const dt = 0.08;
+    const Tsim = 20;
+    let data = null;
+    let frame = 0;
+    let raf;
+
+   
+    const inputs = ['radius','mass','height','frequency','damping'];
+    inputs.forEach(id => {
+      const range = document.getElementById(id);
+      const num = document.getElementById(id + 'Num');
+      range.addEventListener('input', () => num.value = range.value);
+      num.addEventListener('input', () => range.value = num.value);
+    });
+    const btnStart = document.getElementById('start');
+    const btnReset = document.getElementById('reset');
+    const cWave = document.getElementById('canvasWave');
+    const ctxWave = cWave.getContext('2d');
+    const cBuoy = document.getElementById('canvasBuoy');
+    const ctxBuoy = cBuoy.getContext('2d');
+    const cEnergy = document.getElementById('canvasEnergy');
+    const ctxEnergy = cEnergy.getContext('2d');
+
+   
+    function simulate({ radius, mass, height, freq, damping }) {
+      const pasos = Math.floor(Tsim / dt);
+      const tiempo = Array.from({ length: pasos }, (_, i) => i * dt);
+      const ola = tiempo.map(t => height * Math.sin(2 * Math.PI * freq * t));
+      const pos = Array(pasos).fill(0);
+      const vel = Array(pasos).fill(0);
+      const ene = Array(pasos).fill(0);
+      for (let i = 0; i < pasos - 1; i++) {
+        const fOla = 0.5 * rho * Math.PI * radius * radius * ola[i];
+        const fRes = -rho * g * Math.PI * radius * radius * pos[i];
+        const fAmo = -damping * vel[i];
+        const acc = (fOla + fRes + fAmo) / mass;
+        vel[i+1] = vel[i] + acc * dt;
+        pos[i+1] = pos[i] + vel[i] * dt;
+        const pot = damping * vel[i+1] * vel[i+1];
+        ene[i+1] = ene[i] + pot * dt;
+      }
+      return { tiempo, ola, pos, ene };
+    }
+
+   
+    function draw(ctx, xArr, yArr, color, unit, label) {
+      const W = ctx.canvas.width, H = ctx.canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const margin = 40;
+
+     
+      const fmt = new Intl.NumberFormat('es-ES', {
+        notation: 'compact',
+        compactDisplay: 'short',
+        maximumFractionDigits: 1
+      });
+
+     
+      const minY = Math.min(...yArr);
+      const maxY = Math.max(...yArr);
+
+     
+      const scaleX = (W - 2 * margin) / Math.max(...xArr);
+      const scaleY = (H - 2 * margin) / (maxY - minY);
+
+      const getX = x => margin + x * scaleX;
+      const getY = y => H - margin - (y - minY) * scaleY;
+
+     
+      ctx.strokeStyle = '#aaa';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(margin, H - margin);
+      ctx.lineTo(W - margin, H - margin);
+      ctx.moveTo(margin, margin);
+      ctx.lineTo(margin, H - margin);
+      ctx.stroke();
+
+     
+      const numTicksX = 5;
+      const deltaX = Math.max(...xArr) / numTicksX;
+      for (let i = 0; i <= numTicksX; i++) {
+        const xVal = i * deltaX;
+        const xPos = getX(xVal);
+        ctx.beginPath();
+        ctx.moveTo(xPos, H - margin - 5);
+        ctx.lineTo(xPos, H - margin + 5);
+        ctx.stroke();
+        ctx.fillText(xVal.toFixed(1), xPos - 15, H - margin + 20);
+      }
+
+     
+      const numTicksY = 5;
+      const deltaY = (maxY - minY) / numTicksY;
+      for (let i = 0; i <= numTicksY; i++) {
+        const yVal = minY + i * deltaY;
+        const yPos = getY(yVal);
+        ctx.beginPath();
+        ctx.moveTo(margin - 5, yPos);
+        ctx.lineTo(margin + 5, yPos);
+        ctx.stroke();
+        const labelY = fmt.format(yVal);
+        ctx.fillText(labelY, margin - 35, yPos + 5);
+      }
+
+     
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const points = [];
+      xArr.forEach((x, i) => {
+        const xp = getX(x);
+        const yp = getY(yArr[i]);
+        points.push({ x: xp, y: yp, time: xArr[i], value: yArr[i] });
+        if (i === 0) ctx.moveTo(xp, yp);
+        else ctx.lineTo(xp, yp);
+      });
+      ctx.stroke();
+      return points;
+    }
+
+   
+    function handleMouseMove(canvas, ctx, dataPoints, unit, label) {
+      canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+       
+        draw(ctx, data.tiempo.slice(0, frame),
+                 (label==='Altura Ola'? data.ola :
+                  label==='Posición Boya'? data.pos :
+                  data.ene.map(e=>e/1e6))
+                 .slice(0, frame),
+             label==='Altura Ola'? '#3498db' :
+             label==='Posición Boya'? '#2ecc71' :
+             '#e74c3c',
+             label==='Energía Acum.'? 'MJ' : 'm',
+             label);
+
+       
+        for (let i = 0; i < dataPoints.length - 1; i++) {
+          const p1 = dataPoints[i], p2 = dataPoints[i+1];
+          if (mouseX >= p1.x && mouseX <= p2.x) {
+            const tInterp = (mouseX - p1.x) / (p2.x - p1.x);
+            const yInterp = p1.y + tInterp * (p2.y - p1.y);
+            const time = p1.time + tInterp * (p2.time - p1.time);
+            const value = p1.value + tInterp * (p2.value - p1.value);
+            const message = `Tiempo: ${time.toFixed(2)}s, ${label}: ${value.toFixed(2)} ${unit}`;
+
+           
+            const metrics = ctx.measureText(message);
+            const textWidth = metrics.width;
+            let textX = mouseX - 180;
+            if (textX < 10) textX = mouseX + 10;
+            else if (textX + textWidth > canvas.width - 10)
+              textX = mouseX - textWidth - 10;
+
+           
+            ctx.beginPath();
+            ctx.arc(mouseX, yInterp, 5, 0, 2*Math.PI);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = 'black';
+            ctx.font = '12px sans-serif';
+            ctx.fillText(message, textX, yInterp + 20);
+            break;
+          }
+        }
+      });
+    }
+
+   
+    function renderFrame(idx) {
+      const t = data.tiempo.slice(0, idx);
+      const wavePoints  = draw(ctxWave,  t, data.ola.slice(0, idx),       '#3498db', 'm',  'Altura Ola');
+      const buoyPoints  = draw(ctxBuoy,  t, data.pos.slice(0, idx),       '#2ecc71', 'm',  'Posición Boya');
+      const energyPoints= draw(ctxEnergy,t, data.ene.map(e=>e/1e6).slice(0, idx), '#e74c3c','MJ','Energía Acum.');
+
+      handleMouseMove(cWave,  ctxWave,  wavePoints,  'm',  'Altura Ola');
+      handleMouseMove(cBuoy,  ctxBuoy,  buoyPoints,  'm',  'Posición Boya');
+      handleMouseMove(cEnergy,ctxEnergy,energyPoints,'MJ','Energía Acum.');
+    }
+
+   
+    function animate() {
+      frame++;
+      if (frame > data.tiempo.length) return;
+      renderFrame(frame);
+      raf = requestAnimationFrame(animate);
+    }
+
+   
+    btnStart.addEventListener('click', () => {
+      cancelAnimationFrame(raf);
+      const params = {
+        radius:   parseFloat(radius.value),
+        mass:     parseFloat(mass.value),
+        height:   parseFloat(height.value),
+        freq:     parseFloat(frequency.value),
+        damping:  parseFloat(damping.value)
+      };
+      data = simulate(params);
+      frame = 1;
+      renderFrame(frame);
+      raf = requestAnimationFrame(animate);
+    });
+
+    btnReset.addEventListener('click', () => {
+      cancelAnimationFrame(raf);
+      frame = 0;
+      [ctxWave, ctxBuoy, ctxEnergy].forEach(ctx =>
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      );
+    });
+  </script>
+</body>
+</html>
+
